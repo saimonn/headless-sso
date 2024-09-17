@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
+	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 )
 
@@ -92,20 +93,28 @@ func ssoLogin(url string) {
 	username, passphrase := getCredentials()
 	spinner.Message(color.MagentaString("init headless-browser \n"))
 	spinner.Pause()
-	browser := rod.New().MustConnect().Trace(false)
+	curl := launcher.New().
+		Headless(true).
+		Devtools(false).
+		MustLaunch()
+
+	browser := rod.New().ControlURL(curl).Trace(false).MustConnect()
 	loadCookies(*browser)
 	defer browser.MustClose()
-	
+
 	err := rod.Try(func() {
 		page := browser.MustPage(url)
-		
+		w := page.WaitRequestIdle(time.Second*time.Duration(5), []string{}, []string{})
+		w()
 		// authorize
 		spinner.Unpause()
 		spinner.Message("logging in")
-		page.MustElementR("button", "Next").MustWaitEnabled().MustPress()
 
-		// sign-in
-		page.Race().ElementR("button", "Allow").MustHandle(func(e *rod.Element) {
+		page.MustElementR("button", "Confirm and continue").MustClick()
+
+		spinner.Message("waited")
+
+		page.Race().ElementR("span", "Allow access").MustHandle(func(e *rod.Element) {
 		}).Element("#awsui-input-0").MustHandle(func(e *rod.Element) {
 			signIn(*page, username, passphrase)
 			// mfa required step
@@ -116,20 +125,23 @@ func ssoLogin(url string) {
 		unauthorized := true
 		for unauthorized {
 
-			txt := page.Timeout(MFA_TIMEOUT * time.Second).MustElement(".awsui-util-mb-s").MustWaitLoad().MustText()
-			if txt == "Request approved" {
+			exists, _, _ := page.HasR("span", "Allow access")
+			if exists {
+				page.MustElementR("span", "Allow access").MustClick()
 				unauthorized = false
-			} else {
-				exists, _, _ := page.HasR("button", "Allow")
-				if exists {
-					page.MustWaitLoad().MustElementR("button", "Allow").MustClick()
-				}
-
-				time.Sleep(500 * time.Millisecond)
 			}
+
+			time.Sleep(500 * time.Millisecond)
 		}
 
-		saveCookies(*browser)
+		exists, _, _ := page.HasR("div", "Request approved")
+
+		if exists {
+			spinner.StopMessage("Request approved")
+			saveCookies(*browser)
+			browser.MustClose()
+		}
+
 	})
 
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
+	"fmt"
 
 	"github.com/fatih/color"
 	"github.com/gen2brain/beeep"
@@ -72,11 +73,23 @@ func getURL() string {
 	return url
 }
 
-// get aws credentials from netrc file
+// get credentials from ENV, fallback to .netcrc file
 func getCredentials() (string, string) {
-	spinner.Message("fetching credentials from .netrc")
+    username, exists_u := os.LookupEnv("SSO_USERNAME")
+    passphrase, exists_p := os.LookupEnv("SSO_PASSWORD")
+    if (exists_u && exists_p) {
+	    spinner.Message("Using credentials from environment.")
+	    return username, passphrase
+    }else{
+      return getCredentialsFromNetrc()
+    }
+}
+
+// get aws credentials from netrc file
+func getCredentialsFromNetrc() (string, string) {
 
 	usr, _ := user.Current()
+	spinner.Message(fmt.Sprintf("fetching credentials from %s/.netrc", usr.HomeDir) )
 	f, err := netrc.ParseFile(filepath.Join(usr.HomeDir, ".netrc"))
 	if err != nil {
 		panic(".netrc file not found in HOME directory")
